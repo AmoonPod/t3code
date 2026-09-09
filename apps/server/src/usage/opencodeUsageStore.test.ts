@@ -92,6 +92,40 @@ describe("readOpenCodeUsageRecords", () => {
     expect(read.records[1]?.totals.outputTokens).toBe(1);
   });
 
+  it("reads past a page boundary without losing or reordering records", async () => {
+    const dbPath = NodePath.join(dir, "opencode.db");
+    const database = createMessageStore(dbPath);
+    const insert = database.prepare(
+      "INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+    );
+    const base = 1_788_951_671_960;
+    for (let index = 0; index < 1201; index += 1) {
+      const createdMs = base + index;
+      insert.run(
+        `msg_${index}`,
+        "ses_1",
+        createdMs,
+        JSON.stringify({
+          role: "assistant",
+          cost: 0.001,
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: "m",
+          providerID: "p",
+          time: { created: createdMs },
+        }),
+      );
+    }
+    database.close();
+
+    const read = await readOpenCodeUsageRecords(dbPath, base);
+
+    expect(read.kind).toBe("ok");
+    if (read.kind !== "ok") return;
+    expect(read.records).toHaveLength(1201);
+    expect(read.records[0]?.timestampMs).toBe(base);
+    expect(read.records.at(-1)?.timestampMs).toBe(base + 1200);
+  });
+
   it("reports a store that was never created as missing", async () => {
     const read = await readOpenCodeUsageRecords(NodePath.join(dir, "absent.db"), 0);
     expect(read.kind).toBe("missing");
