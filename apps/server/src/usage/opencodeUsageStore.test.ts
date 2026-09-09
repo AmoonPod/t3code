@@ -126,6 +126,26 @@ describe("readOpenCodeUsageRecords", () => {
     expect(read.records.at(-1)?.timestampMs).toBe(base + 1200);
   });
 
+  it("orders records by message time, not insertion order", async () => {
+    const dbPath = NodePath.join(dir, "opencode.db");
+    const database = createMessageStore(dbPath);
+    const insert = database.prepare(
+      "INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)",
+    );
+    // A backfilled message lands later in the table than an older instant.
+    const late = assistantRow({ createdMs: 5_000 });
+    const backfilled = assistantRow({ createdMs: 2_000, input: 10 });
+    insert.run("msg_late", late.sessionId, late.createdMs, late.data);
+    insert.run("msg_backfill", backfilled.sessionId, backfilled.createdMs, backfilled.data);
+    database.close();
+
+    const read = await readOpenCodeUsageRecords(dbPath, 0);
+
+    expect(read.kind).toBe("ok");
+    if (read.kind !== "ok") return;
+    expect(read.records.map((record) => record.timestampMs)).toEqual([2_000, 5_000]);
+  });
+
   it("reports a store that was never created as missing", async () => {
     const read = await readOpenCodeUsageRecords(NodePath.join(dir, "absent.db"), 0);
     expect(read.kind).toBe("missing");

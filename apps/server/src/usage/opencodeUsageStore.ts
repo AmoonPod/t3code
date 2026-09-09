@@ -63,10 +63,13 @@ function yieldToEventLoop(): Promise<void> {
  *
  * Pages walk `rowid`, which is the table's B-tree key, so each page is a
  * direct seek rather than a rescan; `time_created` carries no index and is
- * filtered per row. A row whose payload no longer parses (an older or newer
- * OpenCode writing an unexpected shape) is skipped individually, mirroring how
- * the JSONL parsers treat unrecognised lines, so one odd row cannot blank out
- * the provider.
+ * filtered per row. Insertion order is not chronological — a backfilled or
+ * clock-adjusted message can hold a later `rowid` with an earlier
+ * `time_created` — so the returned records are ordered by `time_created` with
+ * `rowid` as the tie breaker. A row whose payload no longer parses (an older
+ * or newer OpenCode writing an unexpected shape) is skipped individually,
+ * mirroring how the JSONL parsers treat unrecognised lines, so one odd row
+ * cannot blank out the provider.
  */
 export async function readOpenCodeUsageRecords(
   dbPath: string,
@@ -92,7 +95,7 @@ export async function readOpenCodeUsageRecords(
     const selectPage = database.prepare(
       "SELECT rowid, session_id, data, time_created FROM message WHERE rowid > ? ORDER BY rowid LIMIT ?",
     );
-    const records: UsageRecord[] = [];
+    const parsed: { readonly rowid: number; readonly record: UsageRecord }[] = [];
     let lastRowid = 0;
     for (;;) {
       const rows = selectPage.all(lastRowid, PAGE_SIZE) as unknown as readonly {
@@ -110,11 +113,14 @@ export async function readOpenCodeUsageRecords(
           row.data,
           typeof row.session_id === "string" ? row.session_id : "",
         );
-        if (record !== null) records.push(record);
+        if (record !== null) parsed.push({ rowid: row.rowid, record });
       }
       if (rows.length < PAGE_SIZE) break;
       await yieldToEventLoop();
     }
+    const records = parsed
+      .toSorted((a, b) => a.record.timestampMs - b.record.timestampMs || a.rowid - b.rowid)
+      .map((entry) => entry.record);
     return { kind: "ok", records };
   } catch (error) {
     return { kind: "failed", message: failureMessage(error) };
