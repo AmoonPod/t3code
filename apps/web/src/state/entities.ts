@@ -26,6 +26,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
+import type { RunStopPresentation } from "@t3tools/client-runtime/state/thread-execution";
 import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
@@ -55,6 +56,9 @@ const EMPTY_THREAD_SHELL_ATOM = Atom.make<EnvironmentThreadShell | null>(null).p
 );
 const EMPTY_THREAD_PROJECTION_ATOM = Atom.make<EnvironmentThread | null>(null).pipe(
   Atom.withLabel("web-thread-projection:empty"),
+);
+const NO_RUN_STOP_ATOM = Atom.make<RunStopPresentation | null>(null).pipe(
+  Atom.withLabel("web-thread-run-stop:empty"),
 );
 const EMPTY_THREAD_STATUS_ATOM = Atom.make<EnvironmentThreadStatus>("empty").pipe(
   Atom.withLabel("web-thread-status:empty"),
@@ -190,6 +194,18 @@ export function useThreadHistory(ref: ScopedThreadRef | null): ThreadHistoryMeta
   return useAtomValue(
     ref === null ? EMPTY_THREAD_HISTORY_ATOM : environmentThreadDetails.historyAtom(ref),
   );
+}
+
+/**
+ * Run-stop state for a thread whose detail may load. Pass the detail ref, never a draft's ref:
+ * a draft's detail read 404s and parks the thread as deleted, even after the server creates it.
+ */
+export function threadRunStopAtom(ref: ScopedThreadRef | null) {
+  return ref === null ? NO_RUN_STOP_ATOM : environmentThreadDetails.runStopAtom(ref);
+}
+
+export function useThreadRunStop(ref: ScopedThreadRef | null): RunStopPresentation | null {
+  return useAtomValue(threadRunStopAtom(ref));
 }
 
 export function resolveThreadDetailRef(
